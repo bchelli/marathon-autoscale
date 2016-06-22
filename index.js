@@ -6,8 +6,8 @@
  * Env Vars
  */
 var marathonHost = process.env.MARATHON_HOST;
-var scalingInterval = process.env.SCALING_INTERVAL || 5;
-var integralPeriod = process.env.INTEGRAL_PERIOD || 30;
+var scalingInterval = process.env.SCALING_INTERVAL || 30;
+var errorHistoryLength = process.env.ERROR_HISTORY_LENGTH || 30;
 
 
 
@@ -24,6 +24,9 @@ var labels = {
 	minMemPercent:       { default: 50,     parser: parseInt },
 	maxCpuPercent:       { default: 40,     parser: parseInt },
 	minCpuPercent:       { default: 10,     parser: parseInt },
+
+	weightError:        { default: 1,       parser: parseInt },
+	weightErrorHistory: { default: 4,       parser: parseInt },
 
 	maxInstances:        { default: 30,     parser: parseInt },
 	minInstances:        { default: 1,      parser: parseInt },
@@ -64,7 +67,7 @@ var errors = {};
 				var factor = 4;
 				var error = Math.max(app.stats.cpu - targetCpuPercent, app.stats.mem - targetMemPercent);
 				if (errs.length) {
-					error = (error + factor * avg(errs)) / (1 + factor);
+					error = (getConf(app, 'weightError') * error + getConf(app, 'weightErrorHistory') * avg(errs)) / (getConf(app, 'weightError') + getConf(app, 'weightErrorHistory'));
 				}
 				error = Math.min(1, Math.max(-1, error));
 
@@ -81,10 +84,10 @@ var errors = {};
 					console.log(`        [${app.id}] Cpu:   ${app.stats.cpu} (target: ${targetCpuPercent})`);
 					console.log(`        [${app.id}] Mem:   ${app.stats.mem} (target: ${targetMemPercent})`);
 					console.log(`        [${app.id}] Tasks: ${currentInstance} (target: ${targetInstances}, scale: ${targetInstances - currentInstance})`);
-					console.log(`        [${app.id}] Err:   ${scalingInterval * errs.reduce((total, value) => total + value, 0) / integralPeriod} (integral: ${errs.reduce((total, value) => total + value, 0)})`);
+					console.log(`        [${app.id}] Err:   ${avg(errs)}`);
 
 					errs.push(currentInstance - targetInstances);
-					if (errs.length > integralPeriod) { errs.shift(); }
+					if (errs.length > errorHistoryLength) { errs.shift(); }
 					if (targetInstances !== currentInstance) {
 						console.log(`        [${app.id}] Scalling app from ${currentInstance} to ${targetInstances}`);
 						return scaleApp(app, targetInstances);
