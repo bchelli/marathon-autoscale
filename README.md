@@ -1,6 +1,8 @@
 
 # Marathon Autoscale
 
+## Current version {{VERSION}}
+
 ## Installation
 
 ### From source
@@ -18,7 +20,7 @@ MARATHON_HOST=http://XX.XX.XX.XX:8080 npm run start
 
 ### From docker
 ```shell
-docker run -e "MARATHON_HOST=http://XX.XX.XX.XX:8080" -t bchelli/marathon-autoscale:0.1.2
+docker run -e "MARATHON_HOST=http://XX.XX.XX.XX:8080" -t bchelli/marathon-autoscale:{{VERSION}}
 ```
 
 ### From marathon
@@ -35,7 +37,7 @@ docker run -e "MARATHON_HOST=http://XX.XX.XX.XX:8080" -t bchelli/marathon-autosc
   "container": {
     "type": "DOCKER",
     "docker": {
-      "image": "bchelli/marathon-autoscale:0.1.2",
+      "image": "bchelli/marathon-autoscale:{{VERSION}}",
       "network": "BRIDGE"
     }
   },
