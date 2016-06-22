@@ -2,18 +2,20 @@
 
 VERSION=${1}
 
-# Save current git state
-BRANCH=$(git rev-parse --abbrev-ref HEAD)
-git stash
+# Cannot create a version on not committed changes
+HAS_CHANGES=$(git status --porcelain)
+if [ "#${HAS_CHANGES}" != "#" ]; then
+	echo "Please commit your work first"
+	exit 1
+fi
 
 # Go to the master branch
-git checkout master
-git pull origin master
+git pull origin
 
 # Generate version
-sed -i.bak "s/\{\{VERSION\}\}/${VERSION}/" README.md.tmpl
+sed -i.bak "s/{{VERSION}}/${VERSION}/" README.md.tmpl
 cat README.md.tmpl > README.md
-cat README.md.tmpl.bak > README.md.tmpl
+git checkout -- README.md.tmpl
 rm README.md.tmpl.bak
 
 # Commit version
@@ -29,7 +31,3 @@ git push origin ${VERSION}
 docker build -t marathon-autoscale .
 docker tag marathon-autoscale bchelli/marathon-autoscale:${VERSION}
 docker push bchelli/marathon-autoscale:${VERSION}
-
-# Go back where you were
-git checkout ${BRANCH}
-git stash pop
