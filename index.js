@@ -25,8 +25,8 @@ var labels = {
 	maxCpuPercent:       { default: 40,     parser: parseInt },
 	minCpuPercent:       { default: 10,     parser: parseInt },
 
-	weightError:        { default: 1,       parser: parseInt },
-	weightErrorHistory: { default: 4,       parser: parseInt },
+	weightError:         { default: 1,      parser: parseInt },
+	weightErrorHistory:  { default: 4,      parser: parseInt },
 
 	maxInstances:        { default: 30,     parser: parseInt },
 	minInstances:        { default: 1,      parser: parseInt },
@@ -64,7 +64,6 @@ var errors = {};
 				var errs = (errors[app.id] = errors[app.id] || []);
 
 				// process error based on input metrics
-				var factor = 4;
 				var error = Math.max(app.stats.cpu - targetCpuPercent, app.stats.mem - targetMemPercent);
 				if (errs.length) {
 					error = (getConf(app, 'weightError') * error + getConf(app, 'weightErrorHistory') * avg(errs)) / (getConf(app, 'weightError') + getConf(app, 'weightErrorHistory'));
@@ -272,10 +271,6 @@ function logError (text) {
 		} 
 		throw error;
 	};
-}
-
-function getTaskFromHost (hosts, host, task) {
-	return hosts[host].tasks
 }
 
 function getConf (app, label) {
