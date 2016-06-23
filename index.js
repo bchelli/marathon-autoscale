@@ -6,8 +6,7 @@
  * Env Vars
  */
 var marathonHost = process.env.MARATHON_HOST;
-var scalingInterval = process.env.SCALING_INTERVAL || 30;
-var errorHistoryLength = process.env.ERROR_HISTORY_LENGTH || 30;
+var scalingInterval = process.env.SCALING_INTERVAL || 5;
 
 
 
@@ -24,9 +23,6 @@ var labels = {
 	minMemPercent:       { default: 50,     parser: parseInt },
 	maxCpuPercent:       { default: 40,     parser: parseInt },
 	minCpuPercent:       { default: 10,     parser: parseInt },
-
-	weightError:         { default: 1,      parser: parseInt },
-	weightErrorHistory:  { default: 4,      parser: parseInt },
 
 	maxInstances:        { default: 30,     parser: parseInt },
 	minInstances:        { default: 1,      parser: parseInt },
@@ -48,7 +44,6 @@ if (!marathonHost) {
 /*
  * Start scheduler
  */
-var errors = {};
 (function processCheck (previousState) {
 	console.log('Process Check');
 	getApps()
@@ -56,41 +51,33 @@ var errors = {};
 		.then(getMonitoring(previousState))
 		.then(context => Promise.all(
 			context.apps.map(app => {
+				// get current instance count
+				var currentInstanceCount = app.details.tasks.length;
 
-				var targetCpuPercent = Math.max(getConf(app, 'minCpuPercent'), Math.min(getConf(app, 'maxCpuPercent'), app.stats.cpu));
-				var targetMemPercent = Math.max(getConf(app, 'minMemPercent'), Math.min(getConf(app, 'maxMemPercent'), app.stats.mem));
-
-				// push errors
-				var errs = (errors[app.id] = errors[app.id] || []);
+				// process target values
+				var targetCpuPercent = processTarget(app.stats.cpu, currentInstanceCount, getConf(app, 'minCpuPercent'), getConf(app, 'maxCpuPercent'));
+				var targetMemPercent = processTarget(app.stats.mem, currentInstanceCount, getConf(app, 'minMemPercent'), getConf(app, 'maxMemPercent'));
 
 				// process error based on input metrics
-				var error = Math.max(app.stats.cpu - targetCpuPercent, app.stats.mem - targetMemPercent);
-				if (errs.length) {
-					error = (getConf(app, 'weightError') * error + getConf(app, 'weightErrorHistory') * avg(errs)) / (getConf(app, 'weightError') + getConf(app, 'weightErrorHistory'));
-				}
-				error = Math.min(1, Math.max(-1, error));
+				var error = constraint(Math.max(app.stats.cpu - targetCpuPercent, app.stats.mem - targetMemPercent), -1, 1);
 
 				// process instances
-				var currentInstance = app.details.tasks.length;
-				var targetInstances = constraint(
+				var targetInstanceCount = constraint(
+					Math.round(currentInstanceCount + error),
 					getConf(app, 'minInstances'),
-					getConf(app, 'maxInstances'),
-					Math.floor(currentInstance + error)
+					getConf(app, 'maxInstances')
 				);
 
-				// apply state
-				if (previousState) {
-					console.log(`        [${app.id}] Cpu:   ${app.stats.cpu} (target: ${targetCpuPercent})`);
-					console.log(`        [${app.id}] Mem:   ${app.stats.mem} (target: ${targetMemPercent})`);
-					console.log(`        [${app.id}] Tasks: ${currentInstance} (target: ${targetInstances}, scale: ${targetInstances - currentInstance})`);
-					console.log(`        [${app.id}] Err:   ${avg(errs)}`);
+				// log
+				console.log(`        [${app.id}] Cpu:   ${app.stats.cpu} (target: ${targetCpuPercent})`);
+				console.log(`        [${app.id}] Mem:   ${app.stats.mem} (target: ${targetMemPercent})`);
+				console.log(`        [${app.id}] Tasks: ${currentInstanceCount} (target: ${targetInstanceCount})`);
+				console.log(`        [${app.id}] Err:   ${error}`);
 
-					errs.push(currentInstance - targetInstances);
-					if (errs.length > errorHistoryLength) { errs.shift(); }
-					if (targetInstances !== currentInstance) {
-						console.log(`        [${app.id}] Scalling app from ${currentInstance} to ${targetInstances}`);
-						return scaleApp(app, targetInstances);
-					}
+				// apply state
+				if (previousState && targetInstanceCount !== currentInstanceCount) {
+					console.log(`        [${app.id}] Scalling app from ${currentInstanceCount} to ${targetInstanceCount}`);
+					return scaleApp(app, targetInstanceCount);
 				}
 
 				return Promise.resolve();
@@ -243,7 +230,7 @@ function request (url, options) {
 		;
 }
 
-function constraint (min, max, value) {
+function constraint (value, min, max) {
 	return Math.max(min, Math.min(max, value));
 }
 
@@ -278,3 +265,8 @@ function getConf (app, label) {
 	return processor.parser(app.labels[`marathon-autoscale.${label}`]) || processor.default;
 }
 
+function processTarget(value, instanceCount, min, max) {
+	// the scale down factor is to avoid the scaling yo-yo effect
+	var scaleDownFactor = instanceCount === 1 ? 1 : (instanceCount - 1)/instanceCount;
+	return constraint(value, scaleDownFactor * min, max);
+}

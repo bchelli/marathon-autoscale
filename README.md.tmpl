@@ -72,20 +72,8 @@ Marathon Autoscale relies on labels. Just put the following labels to configure 
 * ```marathon-autoscale.minCpuPercent``` (integer, default: 10): Minimum allowed memory usage => trigger down scaling.
 * ```marathon-autoscale.maxInstances``` (integer, default: 30): Maximum number of instance for the service.
 * ```marathon-autoscale.minInstances``` (integer, default: 1): Minimum number of instance for the service.
-* ```marathon-autoscale.weightError``` (integer, default: 1): Weight of the current error (target 3 instances, current 1 instance => error = 2).
-* ```marathon-autoscale.weightErrorHistory``` (integer, default: 4): Weight for the error history (the more weight you put on the error history, the more the number of instance will be stable).
 
 Environment variables:
 * ```MARATHON_HOST``` (mandatory): Marathon URL, must be http://XX.XX.XX.XX:8080
-* ```SCALING_INTERVAL``` (optional, in seconds, default: 30): number of seconds between 2 processing of the instances scaling.
-* ```ERROR_HISTORY_LENGTH``` (optional, default: 30): number of errors stored in the history of errors.
-
-## Algorithm
-
-```
-instantError = max(averageCpuPercent - targetCpuPercent, averageMemPercent - targetMemPercent)
-scaling = (instantError * weightError + sum(errorHistory) * weightErrorHistory) / (weightError + weightErrorHistory)
-```
-
-Additionally to this algorithm, the scaling mechanism forces an increment of one on the instances.
+* ```SCALING_INTERVAL``` (optional, in seconds, default: 5): number of seconds between 2 processing of the instances scaling.
 
