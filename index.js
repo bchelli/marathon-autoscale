@@ -24,6 +24,9 @@ var labels = {
 	maxCpuPercent:       { default: 40,     parser: parseInt },
 	minCpuPercent:       { default: 10,     parser: parseInt },
 
+	spikeFilterCount:    { default: 2,      parser: parseInt },
+
+	scalePercent:        { default: 10,     parser: parseInt },
 	maxInstances:        { default: 30,     parser: parseInt },
 	minInstances:        { default: 1,      parser: parseInt },
 };
@@ -44,6 +47,7 @@ if (!marathonHost) {
 /*
  * Start scheduler
  */
+var spikeFilterCounts = {};
 (function processCheck (previousState) {
 	console.log('Process Check');
 	getApps()
@@ -55,24 +59,59 @@ if (!marathonHost) {
 				var currentInstanceCount = app.details.tasks.length;
 
 				// process target values
-				var targetCpuPercent = processTarget(app.stats.cpu, currentInstanceCount, getConf(app, 'minCpuPercent'), getConf(app, 'maxCpuPercent'));
-				var targetMemPercent = processTarget(app.stats.mem, currentInstanceCount, getConf(app, 'minMemPercent'), getConf(app, 'maxMemPercent'));
+				// the scaleDownFactor is here to prevent the yo-yo effect on the scaling mechanism
+				// ex: thresholds are 20% to 30% CPU with 1 instance, when the CPU reaches 30% => scale up
+				// now you have 2 instances, (1x30% + 1x0%)/2=20% => scale down
+				var scaleDownFactor = currentInstanceCount === 1 ? 1 : (currentInstanceCount - 1)/currentInstanceCount;
+				// cpu
+				var minCpu = Math.min(scaleDownFactor * getConf(app, 'maxCpuPercent'), getConf(app, 'minCpuPercent'));
+				var maxCpu = getConf(app, 'maxCpuPercent');
+				// mem
+				var minMem = Math.min(scaleDownFactor * getConf(app, 'maxMemPercent'), getConf(app, 'minMemPercent'));
+				var maxMem = getConf(app, 'maxMemPercent');
 
-				// process error based on input metrics
-				var error = constraint(Math.max(app.stats.cpu - targetCpuPercent, app.stats.mem - targetMemPercent), -1, 1);
+				// process the targets based on CPU and mem
+				// cpu
+				var cpuInstanceMin = Math.ceil(currentInstanceCount * app.stats.cpu / maxCpu);
+				var cpuInstanceMax = Math.floor(currentInstanceCount * app.stats.cpu / minCpu);
+				var cpuInstance    = app.stats.cpu > maxCpu ? cpuInstanceMin : ( app.stats.cpu < minCpu ? cpuInstanceMax : currentInstanceCount);
+				// mem
+				var memInstanceMin = Math.ceil(currentInstanceCount * app.stats.mem / maxMem);
+				var memInstanceMax = Math.floor(currentInstanceCount * app.stats.mem / minMem);
+				var memInstance    = app.stats.mem > maxMem ? memInstanceMin : ( app.stats.mem < minMem ? memInstanceMax : currentInstanceCount);
+
+				// process the scaling
+				var maxScale = Math.ceil(currentInstanceCount * getConf(app, 'scalePercent') / 100);
+				var scale = constraint(
+					Math.max(cpuInstance - currentInstanceCount, memInstance - currentInstanceCount),
+					-maxScale,
+					maxScale
+				);
 
 				// process instances
 				var targetInstanceCount = constraint(
-					Math.round(currentInstanceCount + error),
+					currentInstanceCount + scale,
 					getConf(app, 'minInstances'),
 					getConf(app, 'maxInstances')
 				);
 
+				// process spike filter
+				var action = targetInstanceCount > currentInstanceCount ? 1 : (targetInstanceCount < currentInstanceCount ? -1 : 0);
+				var spikeFilterCount = spikeFilterCounts[app.id] = spikeFilterCounts[app.id] || { lastAction: 0, count: 0 };
+				if (action !== spikeFilterCount.lastAction) {
+					spikeFilterCount.lastAction = action;
+					spikeFilterCount.count = 0;
+				}
+				if (spikeFilterCount.count < getConf(app, 'spikeFilterCount')) {
+					spikeFilterCount.count++;
+					targetInstanceCount = currentInstanceCount;
+				}
+
 				// log
-				console.log(`        [${app.id}] Cpu:   ${app.stats.cpu} (target: ${targetCpuPercent})`);
-				console.log(`        [${app.id}] Mem:   ${app.stats.mem} (target: ${targetMemPercent})`);
+				console.log(`        [${app.id}] Cpu:   ${app.stats.cpu.toFixed()}% (scale: ${cpuInstance - currentInstanceCount}, min: ${minCpu.toFixed()}%, max: ${maxCpu.toFixed()}%)`);
+				console.log(`        [${app.id}] Mem:   ${app.stats.mem.toFixed()}% (scale: ${memInstance - currentInstanceCount}, min: ${minMem.toFixed()}%, max: ${maxMem.toFixed()}%)`);
+				console.log(`        [${app.id}] Scale: ${scale} (max: ${maxScale})`);
 				console.log(`        [${app.id}] Tasks: ${currentInstanceCount} (target: ${targetInstanceCount})`);
-				console.log(`        [${app.id}] Err:   ${error}`);
 
 				// apply state
 				if (previousState && targetInstanceCount !== currentInstanceCount) {
@@ -263,10 +302,4 @@ function logError (text) {
 function getConf (app, label) {
 	var processor = labels[label];
 	return processor.parser(app.labels[`marathon-autoscale.${label}`]) || processor.default;
-}
-
-function processTarget(value, instanceCount, min, max) {
-	// the scale down factor is to avoid the scaling yo-yo effect
-	var scaleDownFactor = instanceCount === 1 ? 1 : (instanceCount - 1)/instanceCount;
-	return constraint(value, scaleDownFactor * min, max);
 }
